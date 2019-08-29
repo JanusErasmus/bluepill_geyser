@@ -10,6 +10,7 @@
 #include "Utils/terminal.h"
 #include "Utils/utils.h"
 #include "usb_device.h"
+#include "sonoff_pipe.h"
 
 #define STREET_NODE_ADDRESS     0x00
 #define UPS_NODE_ADDRESS        0x01
@@ -27,6 +28,7 @@ UART_HandleTypeDef espUartHandle;
 RTC_HandleTypeDef hrtc;
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim2;
+SonoffPipe *pipe;
 /* Private variables ---------------------------------------------------------*/
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,16 +115,13 @@ uint32_t sampleTemperature()
 	return adc;
 }
 
-uint8_t esp_buffer[128];
-int esp_head = 0;
-int esp_tail = 0;
+
 
 extern "C" {
 void esp_handle_byte(uint8_t byte)
 {
-	esp_buffer[esp_head] = byte;
-
-	esp_head = (esp_head + 1) % 128;
+	if(pipe)
+		pipe->handleByte(byte);
 }
 }
 
@@ -303,8 +302,9 @@ int main(void)
   MX_ADC1_Init();
   init_espUSART();
 
+  pipe = new SonoffPipe(esp_transmit);
 
-  printf("Bluepill @ %dHz\n", (int)HAL_RCC_GetSysClockFreq());
+  printf("Bluepill Geyser @ %dHz\n", (int)HAL_RCC_GetSysClockFreq());
   MX_RTC_Init();
 
 //  report(netAddress);
@@ -323,18 +323,8 @@ int main(void)
 		  reportToServer = false;
 	  }
 
-	  uint8_t rx[128];
-	  int idx = 0;
-	  while(esp_head != esp_tail)
-	  {
-		  rx[idx++] = esp_buffer[esp_tail];
-		  esp_tail = (esp_tail + 1) % 128;
-	  }
-	  if(idx > 0)
-	  {
-		  rx[idx] = 0;
-		  printf("ESP_RX %s\n", rx);
-	  }
+	  pipe->run();
+
 
       HAL_Delay(100);
       HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
@@ -602,14 +592,6 @@ void adc(uint8_t argc, char **argv)
 	uint32_t temp = getTemperature();
 	printf("temp: %dmC\n", (int)temp);
 }
-
-
-void water(uint8_t argc, char **argv)
-{
-	printf("Toggle water\n");
-
-}
-
 
 void rtc_debug(uint8_t argc, char **argv)
 {

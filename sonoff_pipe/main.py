@@ -78,12 +78,12 @@ def sub_cb(topic, msg):
     uart.write("~\n\r")
 
 def connect_and_subscribe():
-  global client_id, mqtt_server, topic_sub
+  global client_id, mqtt_server, topic_sub, topic_pub
   client = MQTTClient(client_id, mqtt_server, 1883, 'janus', 'Janus506')
   client.set_last_will(topic_pub, '{\"msg\":\"offline\"}')
   client.set_callback(sub_cb)
   client.connect()
-  client.subscribe(topic_sub)
+  client.subscribe(topic_pub)
   print('Connected to %s MQTT broker, subscribed to %s topic' % (mqtt_server, topic_sub))
   return client
 

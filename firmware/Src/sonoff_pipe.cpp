@@ -6,6 +6,8 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <string.h>
+#include <stdlib.h>
 
 #include "sonoff_pipe.h"
 #include "stm32f1xx_hal.h"
@@ -15,8 +17,11 @@ SonoffPipe::SonoffPipe(int (*transmit_cb)(uint8_t *buffer, int len)) : transmitC
 	mHead = 0;
 	mTail = 0;
 	mKeepAliveTick = 0;
-	mSonoffOK = false;
+	mSonoffReply = UNKNOWN;
 	mState = IDLE;
+	mPublishMessage = 0;
+	mPromptCount = 0;
+	mReceiveCB = 0;
 }
 
 SonoffPipe::~SonoffPipe()
@@ -29,7 +34,7 @@ void SonoffPipe::handleByte(uint8_t byte)
 	mHead = (mHead + 1) % 128;
 }
 
-void SonoffPipe::run()
+void SonoffPipe::serviceBuffer()
 {
 	while(mHead != mTail)
 	{
@@ -44,54 +49,105 @@ void SonoffPipe::run()
 				handleLine((const char*)line);
 			}
 			idx = 0;
-		}
-		else
-		{
-			idx++;
+			continue;
 		}
 
-		if(idx >= 128)
+		//check if this was a message for this node
+		if((line[idx] == '~'))
+		{
+			if(idx > 1)
+			{
+				line[idx] = 0;
+				if(mReceiveCB)
+					mReceiveCB((const char*)line);
+			}
+			idx = 0;
+			continue;
+		}
+
+		//check if this was a terminal prompt >>>
+		if (idx > 2)
+		{
+			if(!strncmp((char*)line, ">>>", 3))
+			{
+
+				printf("Terminal prompt on sonoff\n");
+				mSonoffReply = WAIT_TERMINAL;
+
+				if(mPromptCount > 5)
+					mState = EXIT_PY;
+			}
+		}
+
+		if(idx++ >= 128)
 			idx = 0;
 	}
+}
+
+void SonoffPipe::run()
+{
+	serviceBuffer();
 
 	if(mKeepAliveTick < HAL_GetTick())
 	{
 		mKeepAliveTick = HAL_GetTick() + 30000;
-		if(mState == WAIT_OK)
+		switch(mState)
 		{
-			printf("Sonoff timed out\n");
+		case WAIT_KO:
+		{
+			printf("Sonoff hello timed out\n");
+			mState = EXIT_PY;
+			break;
+		}
+		case WAIT_TERMINAL:
+		{
+			printf("Sonoff terminal timed out\n");
 			mState = EXIT_PY;
 		}
-		mState = CHECK_STATE;
+		break;
+		default:
+			mState = CHECK_STATE;
+			break;
+		}
 	}
 
 	switch(mState)
 	{
+		case UNKNOWN:
 		case IDLE:
 			break;
 		case CHECK_STATE:
 		{
-			printf("Check Sonoff state\n");
-			mSonoffOK = false;
+			//printf("Check Sonoff state\n");
 			uint8_t buff[] = {"hello\n"};
 			if(transmitCB(buff, 6))
 			{
-				mState = WAIT_OK;
+				mState = WAIT_KO;
+			}
+		}
+		break;
+		case WAIT_KO:
+		{
+			if(mSonoffReply == WAIT_KO)
+			{
+				mSonoffReply = UNKNOWN;
+				//printf("KO replied\n");
+				mState = IDLE;
 			}
 		}
 		break;
 		case WAIT_OK:
 		{
-			if(mSonoffOK)
+			if(mSonoffReply == WAIT_OK)
 			{
-				printf("OK replied\n");
+				mSonoffReply = UNKNOWN;
+				//printf("OK replied\n");
 				mState = IDLE;
 			}
 		}
 		break;
 		case EXIT_PY:
 		{
-			mSonoffOK = false;
 			uint8_t buff[] = {"exit\n"};
 			if(transmitCB(buff, 6))
 			{
@@ -102,11 +158,40 @@ void SonoffPipe::run()
 			break;
 		case WAIT_TERMINAL:
 		{
-
+			if(mSonoffReply == WAIT_TERMINAL)
+			{
+				printf("Sonoff terminal available\n");
+				uint8_t ctr_D = 0x04;
+				if(transmitCB(&ctr_D, 1))
+				{
+					mPromptCount = 0;
+					printf("Software Reset signal sent\n");
+					mState = IDLE;
+				}
+			}
 		}
 		break;
-		case RESET:
+		case PUBLISH:
 		{
+			if(mPublishMessage)
+			{
+				//printf("Sonoff Publish %s\n", mPublishMessage);
+
+				if(transmitCB((uint8_t*)mPublishMessage, strlen(mPublishMessage)))
+				{
+					free(mPublishMessage);
+					mPublishMessage = 0;
+					mState = WAIT_OK;
+				}
+				else
+				{
+					printf("Sent publish request timed out\n");
+				}
+			}
+			else
+			{
+				mState = IDLE;
+			}
 
 		}
 		break;
@@ -118,13 +203,43 @@ void SonoffPipe::handleLine(const char *line)
 	printf("sonoff_RX %s\n", line);
 	if(!strncmp(line, "KO", 2))
 	{
-		mSonoffOK = true;
+		mSonoffReply = WAIT_KO;
+	}
+	if(!strncmp(line, "OK", 2))
+	{
+		mSonoffReply = WAIT_OK;
 	}
 }
 
-void SonoffPipe::checkSonoff()
+
+void SonoffPipe::resetSonoff()
 {
-	printf("Check Sonoff connection\n");
+	printf("Reset Sonoff\n");
 
+	mState = EXIT_PY;
 
+}
+
+bool SonoffPipe::publish(const char *message)
+{
+	if(mState != IDLE)
+		return false;
+
+	if(mPublishMessage)
+		free(mPublishMessage);
+
+	int str_len = strlen(message);
+	mPublishMessage = (char*)malloc(str_len + 2);
+	strcpy(mPublishMessage, message);
+	mPublishMessage[str_len] = '~';
+	mPublishMessage[str_len + 1] = 0;
+
+	mState = PUBLISH;
+
+	return true;
+}
+
+void SonoffPipe::setReceivedCB(void (*receive_cb)(const char* line))
+{
+	mReceiveCB = receive_cb;
 }

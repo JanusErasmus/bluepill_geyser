@@ -83,7 +83,7 @@ def connect_and_subscribe():
   client.set_last_will(topic_pub, '{\"msg\":\"offline\"}')
   client.set_callback(sub_cb)
   client.connect()
-  client.subscribe(topic_pub)
+  client.subscribe(topic_sub)
   print('Connected to %s MQTT broker, subscribed to %s topic' % (mqtt_server, topic_sub))
   return client
 

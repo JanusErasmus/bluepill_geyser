@@ -11,9 +11,9 @@ void mqtt(uint8_t argc, char **argv);
 const sTermEntry_t mqttEntry =
 { "m", "MQTT report", mqtt };
 
-void reset_esp(uint8_t argc, char **argv);
+void reset_sonoff(uint8_t argc, char **argv);
 const sTermEntry_t espEntry =
-{ "esp", "Reset ESP32", reset_esp };
+{ "esp", "Reset ESP32", reset_sonoff };
 
 
 void exit_py(uint8_t argc, char **argv);

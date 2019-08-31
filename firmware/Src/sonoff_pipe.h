@@ -13,23 +13,29 @@ class SonoffPipe
 {
 	enum eState
 	{
+		UNKNOWN,
 		IDLE,
 		CHECK_STATE,
+		WAIT_KO,
 		WAIT_OK,
 		EXIT_PY,
 		WAIT_TERMINAL,
-		RESET
+		PUBLISH
 	}mState;
 	uint8_t mBuffer[128];
 	uint8_t line[128];
 	int idx = 0;
 	int mHead;
 	int mTail;
+	char *mPublishMessage;
 	int (*transmitCB)(uint8_t *buffer, int len);
 	uint32_t mKeepAliveTick;
-	bool mSonoffOK;
-	void checkSonoff();
+	eState mSonoffReply;
+	int  mPromptCount;
+
+	void serviceBuffer();
 	void handleLine(const char* line);
+	void (*mReceiveCB)(const char* line);
 
 public:
 	SonoffPipe(int (*transmit_cb)(uint8_t *buffer, int len));
@@ -37,6 +43,10 @@ public:
 
 	void handleByte(uint8_t byte);
 	void run();
+	void resetSonoff();
+
+	bool publish(const char *message);
+	void setReceivedCB(void (*receive_cb)(const char* line));
 };
 
 #endif /* SRC_SONOFF_PIPE_H_ */

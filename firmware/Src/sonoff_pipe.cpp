@@ -93,6 +93,7 @@ void SonoffPipe::run()
 		mKeepAliveTick = HAL_GetTick() + 30000;
 		switch(mState)
 		{
+		case WAIT_OK:
 		case WAIT_KO:
 		{
 			printf("Sonoff hello timed out\n");
@@ -105,8 +106,10 @@ void SonoffPipe::run()
 			mState = EXIT_PY;
 		}
 		break;
-		default:
+		case IDLE:
 			mState = CHECK_STATE;
+			break;
+		default:
 			break;
 		}
 	}
@@ -161,8 +164,8 @@ void SonoffPipe::run()
 			if(mSonoffReply == WAIT_TERMINAL)
 			{
 				printf("Sonoff terminal available\n");
-				uint8_t ctr_D = 0x04;
-				if(transmitCB(&ctr_D, 1))
+				uint8_t reset_seq[] = {0x0A, 0x0D, 0x04};
+				if(transmitCB(reset_seq, 3))
 				{
 					mPromptCount = 0;
 					printf("Software Reset signal sent\n");
@@ -233,6 +236,8 @@ bool SonoffPipe::publish(const char *message)
 	strcpy(mPublishMessage, message);
 	mPublishMessage[str_len] = '~';
 	mPublishMessage[str_len + 1] = 0;
+
+	mKeepAliveTick = HAL_GetTick() + 30000;
 
 	mState = PUBLISH;
 

@@ -22,6 +22,7 @@
 #define GEYSER_NODE_ADDRESS      0x07
 
 #define NODE_ADDRESS WATER_NODE_ADDRESS
+#define MINIMUM_REPORT_RATE 1800000
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef espUartHandle;
@@ -40,6 +41,8 @@ static void MX_ADC1_Init(void);
 }
 
 void init_espUSART(void);
+
+uint32_t last_report = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 enum nodeFrameType_e
@@ -61,8 +64,6 @@ typedef struct {
 	uint8_t reserved[13]; 	//13 31
 	uint8_t crc;			//1  32
 }__attribute__((packed, aligned(4))) nodeData_s;
-
-bool reportToServer = false;
 
 uint32_t getADCstep()
 {
@@ -157,42 +158,41 @@ int esp_transmit(uint8_t *buf, int len)
 		if(HAL_UART_Transmit(&espUartHandle, &buf[k], 1, 300)  != HAL_OK)
 			return -1;
 
-		HAL_Delay(50);
+		HAL_Delay(100);
 	}
 
 	return len;
 }
 
-void report()
+bool report(const char *msg)
 {
-	printf("Reporting\n");
-	//char json[] = {"{\"msg\": \"Hello from node\"}"};
-	char json[] = {"Hi a very long m,essage from the node"};
+	if(!msg)
+	{
+		char json[128];
+		sprintf(json, "{\"uptime\":%d,"
+				"\"temp\":%d,"
+				"\"voltages\":[%ld,%ld,%ld,%ld]"
+				"}",
+				(int)HAL_GetTick(),
+				(int)getTemperature(),
+				(uint32_t)1789,
+				(uint32_t)123,
+				(uint32_t)1567,
+				(uint32_t)1222
+		);
+		msg = (const char*)json;
+	}
 
-	if(!pipe->publish(json))
+	printf("Reporting: %s\n", msg);
+
+	if(!pipe->publish(msg))
+	{
 		printf("Report failed\n");
+		last_report = (HAL_GetTick() + MINIMUM_REPORT_RATE);
+		return false;
+	}
 
-	//esp_transmit((uint8_t*)&json, strlen(json));
-
-//	nodeData_s pay;
-//	memset(&pay, 0, 32);
-//	pay.nodeAddress = NODE_ADDRESS;
-//	pay.timestamp = HAL_GetTick();
-//	pay.temperature = getTemperature();
-//
-//	if(HAL_GPIO_ReadPin(WATER_HOLD_OUT_Port, WATER_HOLD_OUT_Pin) == GPIO_PIN_SET)
-//	{
-//		pay.voltages[0] = 1;
-//	}
-//	else
-//	{
-//		pay.voltages[0] = 2;
-//	}
-//
-//
-//	pay.crc = CRC_8::crc((uint8_t*)&pay, 31);
-
-	//report status in voltages[0-1]
+	return true;
 }
 
 
@@ -253,16 +253,12 @@ int main(void)
   {
 	  terminal_run();
 
-	  if(reportToServer)
-	  {
-		  //before transmitting wait 500 ms intervals of node address
-		  HAL_Delay(200 + (NODE_ADDRESS * 200));
-		  report();
-		  reportToServer = false;
-	  }
-
 	  pipe->run();
 
+	  if(last_report < HAL_GetTick())
+	  {
+		  report(0);
+	  }
 
       HAL_Delay(100);
       HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
@@ -507,7 +503,14 @@ const char *getDayName(int week_day)
 void mqtt(uint8_t argc, char **argv)
 {
 	printf("Report over MQTT\n");
-	reportToServer = true;
+
+	if(argc > 1)
+	{
+		printf(" - custom msg: %s\n", argv[1]);
+		report(argv[1]);
+	}
+	else
+		report(0);
 }
 
 void exit_py(uint8_t argc, char **argv)

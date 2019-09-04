@@ -1,5 +1,4 @@
 EESchema Schematic File Version 4
-LIBS:bluepill_garage-cache
 EELAYER 26 0
 EELAYER END
 $Descr A4 11693 8268
@@ -138,8 +137,6 @@ NoConn ~ 6550 4950
 NoConn ~ 4800 4650
 NoConn ~ 4800 4550
 NoConn ~ 4800 4450
-NoConn ~ 4800 3750
-NoConn ~ 4800 3650
 NoConn ~ 4800 3350
 NoConn ~ 4800 3250
 NoConn ~ 4800 3150
@@ -154,19 +151,6 @@ Text HLabel 7400 4350 2    50   Input ~ 0
 UART1_RX
 Text HLabel 7400 4450 2    50   Output ~ 0
 UART1_TX
-$Comp
-L bluepill_breakouts:BluePill_STM32F103C U?
-U 1 1 5C14BC04
-P 5650 3750
-AR Path="/5C14BC04" Ref="U?"  Part="1" 
-AR Path="/5C14BAF9/5C14BC04" Ref="U2"  Part="1" 
-F 0 "U2" H 5675 2278 50  0000 C CNN
-F 1 "BluePill_STM32F103C" H 5675 2187 50  0000 C CNN
-F 2 "DIP40" H 5700 2150 50  0001 C CNN
-F 3 "www.rogerclark.net" H 5650 2250 50  0001 C CNN
-	1    5650 3750
-	1    0    0    -1  
-$EndComp
 Wire Wire Line
 	4800 4750 4400 4750
 NoConn ~ 6550 3050
@@ -193,14 +177,6 @@ F 3 "" H 6900 2300 50  0001 C CNN
 	1    6900 2300
 	1    0    0    -1  
 $EndComp
-Wire Wire Line
-	6550 3350 7250 3350
-Wire Wire Line
-	6550 3450 7250 3450
-Text HLabel 7250 3450 2    50   Output ~ 0
-PB8
-Text HLabel 7250 3350 2    50   Output ~ 0
-PB9
 $Comp
 L power:GNDREF #PWR?
 U 1 1 5C16DC3A
@@ -217,7 +193,26 @@ $EndComp
 Wire Wire Line
 	6700 3150 6550 3150
 Wire Wire Line
-	3100 3650 4800 3650
-Text Label 3300 3650 0    50   ~ 0
-ONBOARD_LM335
+	4300 3650 4800 3650
+Text HLabel 4300 3650 0    50   Output ~ 0
+UART2_TX
+$Comp
+L bluepill_breakouts:BluePill_STM32F103C U?
+U 1 1 5C14BC04
+P 5650 3750
+AR Path="/5C14BC04" Ref="U?"  Part="1" 
+AR Path="/5C14BAF9/5C14BC04" Ref="U2"  Part="1" 
+F 0 "U2" H 5675 2278 50  0000 C CNN
+F 1 "BluePill_STM32F103C" H 5675 2187 50  0000 C CNN
+F 2 "DIP40" H 5700 2150 50  0001 C CNN
+F 3 "www.rogerclark.net" H 5650 2250 50  0001 C CNN
+	1    5650 3750
+	1    0    0    -1  
+$EndComp
+Text HLabel 4300 3750 0    50   Input ~ 0
+UART2_RX
+Wire Wire Line
+	4800 3750 4300 3750
+NoConn ~ 6550 3350
+NoConn ~ 6550 3450
 $EndSCHEMATC

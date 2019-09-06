@@ -1,5 +1,6 @@
 #include "main.h"
 
+#include <math.h>
 #include <time.h>
 
 #include "Utils/cli.h"
@@ -38,6 +39,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_RTC_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM2_Init(void);
 }
 
 void init_espUSART(void);
@@ -65,62 +67,107 @@ typedef struct {
 	uint8_t crc;			//1  32
 }__attribute__((packed, aligned(4))) nodeData_s;
 
+
+int adc_idx = 0;
+uint16_t adc_raw[4];
+
+uint16_t adc_ch0[80];
+uint16_t adc_ch1[80];
+int adc_ch0_idx = 0;
+int adc_ch1_idx = 0;
+bool adc_ch0_sampled = false;
+bool adc_ch1_sampled = false;
+int adc_trigger_sample = 0;
+int adc_samples_ready = 0;
+//
+//void sampleRaw(
+//		uint32_t &adc0,
+//		uint32_t &adc1,
+//		uint32_t &adc2,
+//		uint32_t &adc3
+//	)
+//{
+//	adc_idx = 0;
+//	HAL_ADC_Start_IT(&hadc1);
+//	HAL_Delay(10); //wait for conversion
+//
+//	adc0 = adc_raw[0];
+//	adc1 = adc_raw[1];
+//	adc2 = adc_raw[2];
+//	adc3 = adc_raw[3];
+//}
+
+bool waitSamples(double &rms)
+{
+	if(adc_samples_ready)
+	{
+		adc_samples_ready = 0;
+
+		double sum = 0;
+		//printf("collected 80 samples\n");
+		for (int k = 0; k < 80; ++k)
+		{
+			//printf("%04X %04X\n", adc_ch0[k], adc_ch1[k]);
+			double raw_voltage = 1.02 - ((double)adc_ch0[k] * 0.000806);
+			//printf(" %02d: %0.3f\n", k, raw_voltage);
+			sum += raw_voltage * raw_voltage;
+		}
+
+		//printf("SUM: %f\n", sum);
+		double mean = sum / 80.0;
+		//printf("M  : %f\n", mean);
+		rms = sqrt(mean) * 29.806259;
+		//printf("RMS:%f A\n", rms);
+
+		return true;
+	}
+
+	return false;
+}
+
 void sampleAnalog(
 		double &temperature,
-		double &voltage0,
-		double &voltage1)
+		double &tempExt,
+		double &current_rms)
 {
-	uint32_t adc0 = 0;
-	uint32_t adc1 = 0;
-	uint32_t adc2 = 0;
-	uint32_t adc3 = 0;
+	uint32_t adc2_sum = 0;
+	//uint32_t adc3_sum = 0;
 
 
 	HAL_ADCEx_Calibration_Start(&hadc1);
+	adc_trigger_sample = 1;
+
+	while(!waitSamples(current_rms))
+		HAL_Delay(20);
+	HAL_ADC_Stop(&hadc1);
+
+	if(current_rms < 0.26)
+		current_rms = 0;
+
 	for (int k = 0; k < 16; ++k)
 	{
-		HAL_ADC_Start(&hadc1);
-		if(HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK)
-		{
-			adc0 += HAL_ADC_GetValue(&hadc1);
-		}
+		//uint32_t adc0 = 0, adc1 = 0, adc2 = 0, adc3 = 0;
+		//sampleRaw(adc0,adc1,adc2,adc3);
 
-		HAL_ADC_Start(&hadc1);
-		if(HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK)
-		{
-			adc1 += HAL_ADC_GetValue(&hadc1);
-		}
-
-		HAL_ADC_Start(&hadc1);
-		if(HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK)
-		{
-			adc2 += HAL_ADC_GetValue(&hadc1);
-		}
-
-		HAL_ADC_Start(&hadc1);
-		if(HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK)
-		{
-			adc3 += HAL_ADC_GetValue(&hadc1);
-		}
+		//adc0_sum += adc_raw[0];
+		//adc1_sum += adc_raw[1];
+		adc2_sum += adc_ch1[k];
+		//adc3_sum += adc_ch0[k];
 
 		HAL_Delay(20);
 	}
-	HAL_ADC_Stop(&hadc1);
 
-	adc0 >>= 4;
-	adc1 >>= 4;
-	adc2 >>= 4;
-	adc3 >>= 4;
+	adc2_sum >>= 4;
 
-//	printf("ADC0: %5ld ", adc0);
-//	printf("ADC1: %5ld ", adc1);
-//	printf("ADC2: %5ld ", adc2);
-//	printf("ADC3: %5ld\n", adc3);
+//	printf("ADC0: %5ld " , (int)adc_raw[0]);
+//	printf("ADC1: %5ld " , (int)adc_raw[1]);
+//	printf("ADC2: %5ld " , (int)adc_raw[2]);
+//	printf("ADC3: %5ld\n", (int)adc_raw[3]);
 
 	//this amount of steps measure 1.2V
-	double step = 1.2 / adc0;
+	double step = 1.2 / adc_raw[0];
 //	printf(" s	%0.3f\n", step);
-	double voltage = ((double)adc1 * step);
+	double voltage = ((double)adc_raw[1] * step);
 	voltage = 1.43 - voltage;
 //	printf(" -	%0.3f\n", voltage);
 	voltage /= 0.0043;
@@ -128,8 +175,9 @@ void sampleAnalog(
 	temperature = (25.0 + voltage) - 11;
 
 	//measure raw voltage
-	voltage0 = (((double)adc2 * step) + 0.01);
-	voltage1 = (((double)adc3 * step) + 0.01);
+	double voltage0 = (((double)adc2_sum * step) + 0.01);
+
+	tempExt = (voltage0 * 100) - 273.0;
 }
 
 
@@ -165,9 +213,6 @@ bool report(const char *msg)
 		double current;
 
 		sampleAnalog(tempInt, tempExt, current);
-
-		tempExt = (tempExt * 100) - 273.0;
-		current = (current * 15.46667) - 19.3977;
 
 		char json[128];
 		sprintf(json, "{\"uptime\":%d,"
@@ -206,67 +251,67 @@ void handleMessage(const char* line)
 
 int main(void)
 {
-  /* MCU Configuration----------------------------------------------------------*/
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* MCU Configuration----------------------------------------------------------*/
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	/* Configure the system clock */
+	SystemClock_Config();
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
 
-  HAL_Delay(1000);
+	HAL_Delay(1000);
 
-  MX_USB_DEVICE_Init();
-  sTerminalInterface_t usb = {
-		  MX_USB_DEVICE_ready,
-		  MX_USB_DEVICE_transmit
-    };
+	MX_USB_DEVICE_Init();
+	sTerminalInterface_t usb = {
+			MX_USB_DEVICE_ready,
+			MX_USB_DEVICE_transmit
+	};
 
-  terminal_serial_Init();
-  sTerminalInterface_t serial = {
-		  terminal_serial_ready,
-		  terminal_serial_transmit
-  };
+	terminal_serial_Init();
+	sTerminalInterface_t serial = {
+			terminal_serial_ready,
+			terminal_serial_transmit
+	};
 
-  sTerminalInterface_t *interfaces[] = {
-		  &serial,
-		  &usb,
-		  0
-  };
+	sTerminalInterface_t *interfaces[] = {
+			&serial,
+			&usb,
+			0
+	};
 
-  terminal_init((sTerminalInterface_t **)&interfaces);
+	terminal_init((sTerminalInterface_t **)&interfaces);
 
-  MX_ADC1_Init();
-  init_espUSART();
+	MX_ADC1_Init();
+	init_espUSART();
+	MX_TIM2_Init();
 
-  pipe = new SonoffPipe(esp_transmit);
-  pipe->setReceivedCB(handleMessage);
+	pipe = new SonoffPipe(esp_transmit);
+	pipe->setReceivedCB(handleMessage);
 
-  printf("Bluepill Geyser @ %dHz\n", (int)HAL_RCC_GetSysClockFreq());
-  MX_RTC_Init();
+	printf("Bluepill Geyser @ %dHz\n", (int)HAL_RCC_GetSysClockFreq());
+	MX_RTC_Init();
 
-//  report(netAddress);
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+	//  report(netAddress);
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
-  /* Infinite loop */
-  while (1)
-  {
-	  terminal_run();
+	/* Infinite loop */
+	while (1)
+	{
+		terminal_run();
 
-	  pipe->run();
+		pipe->run();
 
-	  if(last_report < HAL_GetTick())
-	  {
-		  report(0);
-	  }
+		if(last_report < HAL_GetTick())
+		{
+			report(0);
+		}
 
-      HAL_Delay(100);
-      HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+		HAL_Delay(100);
+		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 
-  }
-
+	}
 }
 
 /** System Clock Configuration
@@ -441,7 +486,6 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
 	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
 }
 
 /*Init ESP UART */
@@ -474,16 +518,15 @@ static void MX_ADC1_Init(void)
 	hadc1.Instance = ADC1;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
 	hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE	;
-	hadc1.Init.DiscontinuousConvMode = ENABLE;
-	hadc1.Init.ContinuousConvMode = DISABLE;
-	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+	hadc1.Init.ContinuousConvMode = ENABLE;
 	hadc1.Init.NbrOfDiscConversion = 1;
-	hadc1.Init.NbrOfConversion = 4;
+	hadc1.Init.DiscontinuousConvMode = DISABLE;
+	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+	hadc1.Init.NbrOfConversion = 1;
 	if (HAL_ADC_Init(&hadc1) != HAL_OK)
 	{
 		_Error_Handler(__FILE__, __LINE__);
 	}
-
 
 	ADC_ChannelConfTypeDef sConfig;
 	sConfig.Channel = ADC_CHANNEL_VREFINT;
@@ -493,34 +536,125 @@ static void MX_ADC1_Init(void)
 	{
 		_Error_Handler(__FILE__, __LINE__);
 	}
+}
 
-	sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-	sConfig.Rank = ADC_REGULAR_RANK_2;
-	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if(adc_trigger_sample)
 	{
-		_Error_Handler(__FILE__, __LINE__);
+		adc_idx = 0;
+		HAL_ADC_Start_IT(&hadc1);
+	}
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+	adc_raw[adc_idx] = HAL_ADC_GetValue(&hadc1);
+
+	//continue to sample the rest of the inputs
+	if(adc_idx <= 4)
+	{
+		ADC_ChannelConfTypeDef sConfig;
+		sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+		sConfig.Rank = ADC_REGULAR_RANK_1;
+		switch(adc_idx)
+		{
+		case 0:
+			sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
+			break;
+		case 1:
+			sConfig.Channel = ADC_CHANNEL_0;
+			break;
+		case 2:
+			adc_ch0[adc_ch0_idx++] = adc_raw[2];
+			if(adc_ch0_idx >= 80)
+			{
+				adc_ch0_sampled = true;
+				adc_ch0_idx = 0;
+			}
+			sConfig.Channel = ADC_CHANNEL_1;
+			break;
+		case 3:
+			adc_ch1[adc_ch1_idx++] = adc_raw[3];
+			if(adc_ch1_idx >= 80)
+			{
+				adc_ch1_sampled = true;
+				adc_ch1_idx = 0;
+			}
+			sConfig.Channel = ADC_CHANNEL_VREFINT;
+			break;
+		}
+		if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+		{
+			_Error_Handler(__FILE__, __LINE__);
+		}
+		HAL_ADC_Start_IT(&hadc1);
 	}
 
-	sConfig.Channel = ADC_CHANNEL_0;
-	sConfig.Rank = ADC_REGULAR_RANK_3;
-	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+
+	if(++adc_idx >= 4)
 	{
-		_Error_Handler(__FILE__, __LINE__);
+		adc_idx = 0;
+		HAL_ADC_Stop_IT(&hadc1);
 	}
 
-	sConfig.Channel = ADC_CHANNEL_1;
-	sConfig.Rank = ADC_REGULAR_RANK_4;
-	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	if(adc_ch0_sampled && adc_ch1_sampled)
 	{
-		_Error_Handler(__FILE__, __LINE__);
+		adc_ch0_sampled = false;
+		adc_ch1_sampled = false;
+		adc_trigger_sample = 0;
+		adc_samples_ready = 1;
 	}
-
 }
 
 /* TIM2 init function */
+static void MX_TIM2_Init(void)
+{
+	//printf("APB1 @ %dHz\n", (int)HAL_RCC_GetPCLK1Freq());
+	TIM_ClockConfigTypeDef sClockSourceConfig;
+	TIM_MasterConfigTypeDef sMasterConfig;
+	TIM_OC_InitTypeDef sConfigOC;
+
+	htim2.Instance = TIM2;
+	htim2.Init.Prescaler = 4500; //input clock is 8kHz (36 000 000 / 4 500)
+	htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim2.Init.Period = 3;   // trigger every 4 cycles, gives 1kHz (25ms) tick
+	htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV4;
+	htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+	if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+	{
+		_Error_Handler(__FILE__, __LINE__);
+	}
+
+	sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+	if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+	{
+		_Error_Handler(__FILE__, __LINE__);
+	}
+
+	if (HAL_TIM_OC_Init(&htim2) != HAL_OK)
+	{
+		_Error_Handler(__FILE__, __LINE__);
+	}
+
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+	{
+		_Error_Handler(__FILE__, __LINE__);
+	}
+
+	sConfigOC.OCMode = TIM_OCMODE_TIMING;
+	sConfigOC.Pulse = 0;
+	sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+	if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+	{
+		_Error_Handler(__FILE__, __LINE__);
+	}
+
+	HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_1);
+}
 
 const char *getDayName(int week_day)
 {
@@ -584,13 +718,26 @@ void adc(uint8_t argc, char **argv)
 
 	sampleAnalog(tempInt, tempExt, current);
 
+	printf("ADC: %0.3f, %0.3f, %0.3f\n", tempInt, tempExt, current);
 
-	//printf(" *	%d\n", voltage);
+//	adc_trigger_sample = 1;
 
-	double temp = (100.0 *  tempExt) - 273;
-	current = (current * 15.46667) - 19.3977;
-
-	printf("ADC: %0.3f, %0.3f, %0.3f\n", tempInt, temp, current);
+//	adc_trigger_sample = 1;
+//	HAL_ADC_Start_IT(&hadc1);
+//	double current;
+//	HAL_ADCEx_Calibration_Start(&hadc1);
+//	for (int k = 0; k < 16; ++k)
+//	{
+//		uint32_t adc0 = 0, adc1 = 0, adc2 = 0, adc3 = 0;
+//		sampleRaw(adc0,adc1,adc2,adc3);
+//		adc0_sum += adc0;
+//		adc1_sum += adc1;
+//		adc2_sum += adc2;
+//		adc3_sum += adc3;
+//
+//		HAL_Delay(20);
+//	}
+//	HAL_ADC_Stop(&hadc1);
 }
 
 void rtc_debug(uint8_t argc, char **argv)

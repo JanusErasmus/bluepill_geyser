@@ -1497,7 +1497,7 @@ void HAL_ADC_IRQHandler(ADC_HandleTypeDef* hadc)
   assert_param(IS_ADC_ALL_INSTANCE(hadc->Instance));
   assert_param(IS_FUNCTIONAL_STATE(hadc->Init.ContinuousConvMode));
   assert_param(IS_ADC_REGULAR_NB_CONV(hadc->Init.NbrOfConversion));
-  
+
   
   /* ========== Check End of Conversion flag for regular group ========== */
   if(__HAL_ADC_GET_IT_SOURCE(hadc, ADC_IT_EOC))

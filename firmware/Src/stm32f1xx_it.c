@@ -40,6 +40,7 @@
 /* External variables --------------------------------------------------------*/
 extern PCD_HandleTypeDef hpcd_USB_FS;
 extern TIM_HandleTypeDef htim2;
+extern ADC_HandleTypeDef hadc1;
 
 /******************************************************************************/
 /*            Cortex-M3 Processor Interruption and Exception Handlers         */ 
@@ -189,6 +190,10 @@ void TIM2_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+void ADC1_2_IRQHandler(void)
+{
+	HAL_ADC_IRQHandler(&hadc1);
+}
 
 /* USER CODE END 1 */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

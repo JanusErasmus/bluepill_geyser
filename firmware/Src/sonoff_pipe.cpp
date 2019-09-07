@@ -68,14 +68,17 @@ void SonoffPipe::serviceBuffer()
 		//check if this was a terminal prompt >>>
 		if (idx > 2)
 		{
-			if(!strncmp((char*)line, ">>>", 3))
+			if(!strncmp((char*)&line[idx - 3], ">>>", 3))
 			{
 
 				printf("Terminal prompt on sonoff\n");
 				mSonoffReply = WAIT_TERMINAL;
 
 				if(mPromptCount > 5)
-					mState = EXIT_PY;
+				{
+
+					mState = WAIT_TERMINAL;
+				}
 			}
 		}
 

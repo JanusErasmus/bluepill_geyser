@@ -23,7 +23,8 @@
 #define GEYSER_NODE_ADDRESS      0x07
 
 #define NODE_ADDRESS WATER_NODE_ADDRESS
-#define MINIMUM_REPORT_RATE 600000// 1800000
+#define MINIMUM_REPORT_RATE 600000 // 10 min
+#define MINIMUM_SAMPLE_RATE 60000 // 1 min
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef espUartHandle;
@@ -44,7 +45,6 @@ static void MX_TIM2_Init(void);
 
 void init_espUSART(void);
 
-uint32_t last_report = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 enum nodeFrameType_e
@@ -67,6 +67,10 @@ typedef struct {
 	uint8_t crc;			//1  32
 }__attribute__((packed, aligned(4))) nodeData_s;
 
+
+uint32_t last_report = 0;
+uint32_t last_sample = 0;
+double reported_rms = 0;
 
 int adc_idx = 0;
 uint16_t adc_raw[4];
@@ -141,7 +145,7 @@ void sampleAnalog(
 		HAL_Delay(20);
 	HAL_ADC_Stop(&hadc1);
 
-	if(current_rms < 0.26)
+	if(current_rms < 0.3)
 		current_rms = 0;
 
 	for (int k = 0; k < 16; ++k)
@@ -178,6 +182,8 @@ void sampleAnalog(
 	double voltage0 = (((double)adc2_sum * step) + 0.01);
 
 	tempExt = (voltage0 * 100) - 273.0;
+
+	last_sample = (HAL_GetTick() + MINIMUM_SAMPLE_RATE);
 }
 
 
@@ -206,12 +212,11 @@ int esp_transmit(uint8_t *buf, int len)
 
 bool report(const char *msg)
 {
+	double current = reported_rms;
 	if(!msg)
 	{
 		double tempInt;
 		double tempExt;
-		double current;
-
 		sampleAnalog(tempInt, tempExt, current);
 
 		char json[128];
@@ -237,7 +242,9 @@ bool report(const char *msg)
 		HAL_Delay(500);
 		return false;
 	}
+
 	last_report = (HAL_GetTick() + MINIMUM_REPORT_RATE);
+	reported_rms = current;
 
 	return true;
 }
@@ -306,6 +313,22 @@ int main(void)
 		if(last_report < HAL_GetTick())
 		{
 			report(0);
+		}
+
+		//check current every minute to see if we should report immediately
+		if(last_sample < HAL_GetTick())
+		{
+			double tempInt;
+			double tempExt;
+			double current;
+			sampleAnalog(tempInt, tempExt, current);
+			//printf("ADC:  c %0.3f -- p %0.3f\n", current, reported_rms);
+
+			//report when there is a fluctuation of 500mA
+			if(((reported_rms - 0.5) > current) || ( current > (reported_rms + 0.5)))
+			{
+				report(0);
+			}
 		}
 
 		HAL_Delay(100);
@@ -719,25 +742,6 @@ void adc(uint8_t argc, char **argv)
 	sampleAnalog(tempInt, tempExt, current);
 
 	printf("ADC: %0.3f, %0.3f, %0.3f\n", tempInt, tempExt, current);
-
-//	adc_trigger_sample = 1;
-
-//	adc_trigger_sample = 1;
-//	HAL_ADC_Start_IT(&hadc1);
-//	double current;
-//	HAL_ADCEx_Calibration_Start(&hadc1);
-//	for (int k = 0; k < 16; ++k)
-//	{
-//		uint32_t adc0 = 0, adc1 = 0, adc2 = 0, adc3 = 0;
-//		sampleRaw(adc0,adc1,adc2,adc3);
-//		adc0_sum += adc0;
-//		adc1_sum += adc1;
-//		adc2_sum += adc2;
-//		adc3_sum += adc3;
-//
-//		HAL_Delay(20);
-//	}
-//	HAL_ADC_Stop(&hadc1);
 }
 
 void rtc_debug(uint8_t argc, char **argv)

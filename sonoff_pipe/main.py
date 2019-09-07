@@ -32,8 +32,6 @@ time.sleep(2)
 print("My MAC is: " + mac_string)
 
 client = None
-last_message = 0
-message_interval = 1
 
 station = network.WLAN(network.STA_IF)
 
@@ -148,34 +146,34 @@ def waitSerialFrame():
 def handleMQTTclient():
   global client
   global running
-  global relay
-  global led
-  global last_message
-  global message_interval
   try:
-    client.check_msg()
-    if (time.time() - last_message) > message_interval:
-      # Flash LED while relay is set
-      if relay.value() == 1:      
-        value = led.value()
-        if value == 1:
-          led.value(0)
-        else:
-          led.value(1)
-
-      last_message = time.time()
-      
+    client.check_msg()      
   except OSError as e:
     uos.dupterm(uart, 1)
     print("Exception in main loop ", e)
     running = False
 
-while running:  
+def toggleLED():
+  global led
+  value = led.value()
+  if value == 1:
+    led.value(0)
+  else:
+    led.value(1)
+
+
+while running:
   # uart.write("running\n\r")
   handleMQTTclient()
   waitSerialFrame()
-  time.sleep(1)
-  #running = False
+  toggleLED()
+
+  # Flash LED faster while relay is set
+  if relay.value() == 1:      
+    time.sleep(0.5)
+  else:
+    time.sleep(1)
+
   pass
 
 uos.dupterm(uart, 1)
@@ -183,5 +181,6 @@ uos.dupterm(uart, 1)
 client.publish(topic_pub, '{\"msg\":\"offline\"}')
 client.disconnect()
 station.disconnect()
+led.value(1)
 
 print("DONE")

@@ -1,4 +1,5 @@
 import time
+import utime
 from umqttsimple import MQTTClient
 import machine
 import ubinascii
@@ -12,12 +13,15 @@ esp.osdebug(None)
 import gc
 gc.collect()
 
+RESET_TIMEOUT = 6.28 * 3600 * 1000
+HEARTBEAT_TIMEOUT = 5 * 60 * 1000
+
 running = True
 
 uart = UART(0,115200)
 
-ssid = 'J_C'
-password = 'VictorHanny874'
+ssid = 'J-C'
+password = 'VictorHanny862'
 mqtt_server = 'jcerasmus.ddns.net'
 #EXAMPLE IP ADDRESS
 #mqtt_server = '192.168.1.144'
@@ -54,7 +58,11 @@ relay.off()
 # Complete project details at https://RandomNerdTutorials.com
 
 def sub_cb(topic, msg):
+  global timeout
+  global heartbeat
   print((topic, msg))
+  timeout = utime.ticks_ms() + RESET_TIMEOUT
+  heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
   if topic == topic_sub:
     if msg == b'set':
         print('Set relay received')
@@ -118,6 +126,7 @@ def handleSerialLine(inputLine):
 
 def publishSerialData(inputLine):
   global client
+  heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
   client.publish(topic_pub, inputLine)
   uart.write("OK\n\r")
   
@@ -125,29 +134,34 @@ def publishSerialData(inputLine):
 # Input frames are framed with 0x7E
 def waitSerialFrame():
   global rx_buffer
-  if uart.any():
+  if uart.any() > 0:
     rx_bytes = uart.read(64)  
     for b in rx_bytes:
       if b == 0x7E: # 126 is a MQTT message
-        if rx_bytes is not None:
+        if rx_bytes is not None and len(rx_bytes) > 0:
           publishSerialData(str(rx_buffer))
           rx_buffer = None
       elif (b == 0x0D) or (b == 0x0A):
-        if rx_bytes is not None:
+        if rx_bytes is not None and len(rx_bytes) > 0:
           handleSerialLine(str(rx_buffer))
           rx_buffer = None
       else:
-        if rx_buffer is None:
-          rx_buffer = chr(b)
-        else:
+        if rx_buffer:
           rx_buffer += chr(b)
+        else:
+          rx_buffer = chr(b)
           
 
 def handleMQTTclient():
   global client
   global running
   try:
-    client.check_msg()      
+    reply = client.check_msg()
+    if reply is not None:
+      client.publish(topic_pub, "{\"msg\":\"OK\"}")
+      print("Reply:" + reply)
+    
+    
   except OSError as e:
     uos.dupterm(uart, 1)
     print("Exception in main loop ", e)
@@ -161,6 +175,9 @@ def toggleLED():
   else:
     led.value(1)
 
+#Reset every 2*Pi hours
+timeout = utime.ticks_ms() + RESET_TIMEOUT
+heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
 
 while running:
   # uart.write("running\n\r")
@@ -170,13 +187,24 @@ while running:
 
   # Flash LED faster while relay is set
   if relay.value() == 1:      
-    time.sleep(0.5)
+    time.sleep(0.2)
   else:
-    time.sleep(1)
+    time.sleep(0.5)
+    
+  if utime.ticks_ms() > heartbeat:
+    heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
+    print("Keep alive heartbeat")
+    client.publish(topic_pub, "{\"msg\":\"heartbeat\"}")
+    
+  if utime.ticks_ms() > timeout:
+    break;
 
   pass
 
 uos.dupterm(uart, 1)
+if running:
+  print("Performing a sanity reset")
+  machine.reset()
 
 client.publish(topic_pub, '{\"msg\":\"offline\"}')
 client.disconnect()

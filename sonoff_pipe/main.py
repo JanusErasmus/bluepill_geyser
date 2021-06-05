@@ -14,7 +14,7 @@ import gc
 gc.collect()
 
 RESET_TIMEOUT = 6.28 * 3600 * 1000
-HEARTBEAT_TIMEOUT = 5 * 60 * 1000
+HEARTBEAT_TIMEOUT = 4 * 60 * 1000
 
 running = True
 
@@ -126,6 +126,7 @@ def handleSerialLine(inputLine):
 
 def publishSerialData(inputLine):
   global client
+  global heartbeat
   heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
   client.publish(topic_pub, inputLine)
   uart.write("OK\n\r")
@@ -150,6 +151,9 @@ def waitSerialFrame():
           rx_buffer += chr(b)
         else:
           rx_buffer = chr(b)
+
+  if rx_buffer is not None and len(rx_buffer) > 64:
+    rx_buffer = None
           
 
 def handleMQTTclient():
@@ -179,27 +183,30 @@ def toggleLED():
 timeout = utime.ticks_ms() + RESET_TIMEOUT
 heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
 
-while running:
-  # uart.write("running\n\r")
-  handleMQTTclient()
-  waitSerialFrame()
-  toggleLED()
+try:
+  while running:
+    # uart.write("running\n\r")
+    handleMQTTclient()
+    waitSerialFrame()
+    toggleLED()
 
-  # Flash LED faster while relay is set
-  if relay.value() == 1:      
-    time.sleep(0.2)
-  else:
-    time.sleep(0.5)
-    
-  if utime.ticks_ms() > heartbeat:
-    heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
-    print("Keep alive heartbeat")
-    client.publish(topic_pub, "{\"msg\":\"heartbeat\"}")
-    
-  if utime.ticks_ms() > timeout:
-    break;
+    # Flash LED faster while relay is set
+    if relay.value() == 1:      
+      time.sleep(0.2)
+    else:
+      time.sleep(0.5)
+      
+    if utime.ticks_ms() > heartbeat:
+      heartbeat = utime.ticks_ms() + HEARTBEAT_TIMEOUT
+      print("Keep alive heartbeat")
+      client.publish(topic_pub, "{\"msg\":\"heartbeat\"}")
+      
+    if utime.ticks_ms() > timeout:
+      break;
 
-  pass
+except:
+  print("Something Fucky, hard reset");
+  machine.reset()
 
 uos.dupterm(uart, 1)
 if running:
